@@ -17,6 +17,7 @@ black = "^23.11.0"
 pytest = "^7.4.3"
 pytest-asyncio = "^0.23.2"
 pytest-local-badge = "^1.0.3"
+ruff = "^0.1.7"
 
 [build-system]
 requires = ["poetry-core"]
