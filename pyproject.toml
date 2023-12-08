@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "async-timer"
+version = "0.0.0dev0"
+description = "The missing Python async timer."
+authors = ["Ilya O. <vrghost@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [
+    {include = "async_timer", from = "src"}
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.11.0"
+pytest = "^7.4.3"
+pytest-asyncio = "^0.23.2"
+pytest-local-badge = "^1.0.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
