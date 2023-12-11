@@ -1,0 +1,32 @@
+---
+name: Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  test:
+    uses: ./.github/workflows/main.yml
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip poetry
+      - name: Build packages
+        run: |
+          poetry version "${GITHUB_REF_NAME}"
+          poetry build
+      - name: Publish distribution to Test PyPI
+        run: |
+          poetry config pypi-token.test-pypi "${{ secrets.TEST_PYPI_API_TOKEN }}"
+          poetry publish -r test-pypi
+      - name: Publish distribution to PRODUCTION PyPI
+        run: |
+          poetry config pypi-token.pypi "${{ secrets.PYPI_API_TOKEN }}"
+          poetry publish
