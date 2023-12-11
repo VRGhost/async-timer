@@ -1,8 +1,11 @@
 """Utility async io functions"""
 import asyncio
 import inspect
+import logging
+import sys
 import typing
 
+logger = logging.getLogger(__name__)
 T = typing.TypeVar("T")
 
 
@@ -10,7 +13,7 @@ class FanoutRv:
     """An object that shares a result actoss all waiters"""
 
     lock: asyncio.Lock
-    futures: list[asyncio.Future]
+    futures: typing.List[asyncio.Future]
 
     def __init__(self):
         self.futures = []
@@ -38,8 +41,12 @@ class FanoutRv:
     async def cancel(self):
         async with self.lock:
             for future in self.futures:
-                future.cancel("Ther timer is shutting down")
+                future.cancel()
             self.futures.clear()
+
+
+def _default_main_loop_exception_callback(exc_type, exc_val, exc_tb):
+    logger.exception("An unexpected exception in the timer loop.")
 
 
 class Timer:
@@ -47,12 +54,21 @@ class Timer:
     target: typing.Callable[[], T]
 
     result_fanout: FanoutRv
-    main_task: asyncio.Task | None = None
+    main_task: typing.Optional[asyncio.Task] = None
+    exception_callback: typing.Callable[[typing.Any, typing.Any, typing.Any], None]
 
-    def __init__(self, delay: float, target: typing.Callable[[], T]):
+    def __init__(
+        self,
+        delay: float,
+        target: typing.Callable[[], T],
+        exc_cb: typing.Callable[
+            [typing.Any, typing.Any, typing.Any], None
+        ] = _default_main_loop_exception_callback,
+    ):
         self.delay = delay
         self.target = target
         self.result_fanout = FanoutRv()
+        self.exception_callback = exc_cb
 
     def start(self):
         """Schedule the timer to run."""
@@ -80,7 +96,9 @@ class Timer:
         """Wait for the next tick of the timer"""
         if not self.is_running():
             raise asyncio.CancelledError("The timer is not running.")
-        return await self.result_fanout.wait()  # this can raise `asyncio.CancelledError`
+        return (
+            await self.result_fanout.wait()
+        )  # this can raise `asyncio.CancelledError`
 
     async def __anext__(self):
         try:
@@ -88,38 +106,54 @@ class Timer:
         except asyncio.CancelledError as err:
             raise StopAsyncIteration() from err
 
+    def _maybe_detect_generator(
+        self, target_rv
+    ) -> typing.Tuple[typing.Any, typing.Callable[[], T]]:
+        """Check if the value returned by the `self.target` call is a
+        kind of generator (sync or async).
+
+        Returns a (this_iter_rv, new_callable) tuple
+        """
+        if inspect.isgenerator(target_rv):
+
+            def _lock_sync_gen_ctx(gen_src):
+                return lambda: next(gen_src)
+
+            get_next_val = _lock_sync_gen_ctx(target_rv)
+            rv = (get_next_val(), get_next_val)
+        elif inspect.isasyncgen(target_rv):
+
+            def _lock_async_gen_ctx(gen_src):
+                return lambda: gen_src.__anext__()
+
+            get_next_val = _lock_async_gen_ctx(target_rv)
+            rv = (get_next_val(), get_next_val)
+        else:
+            rv = (target_rv, None)
+        return rv
+
     async def _loop_callback_routine(self):
         get_next_val = self.target
         first_iter = True
         try:
             while True:
                 try:
-                    maybe_coro = get_next_val()
-                    if first_iter:  # noqa
-                        # Adjust the `get_next_val` on the actual
-                        # return value of the `self.target`
-                        if inspect.isgenerator(maybe_coro):
-
-                            def _lock_sync_gen_ctx(gen_src=maybe_coro):
-                                return lambda: next(gen_src)
-
-                            get_next_val = _lock_sync_gen_ctx()
-                            maybe_coro = get_next_val()
-                        elif inspect.isasyncgen(maybe_coro):
-
-                            def _lock_async_gen_ctx(gen_src=maybe_coro):
-                                return lambda: anext(gen_src)
-
-                            get_next_val = _lock_async_gen_ctx()
-                            maybe_coro = get_next_val()
-                    if inspect.isawaitable(maybe_coro):
-                        rv = await maybe_coro
+                    next_val = get_next_val()
+                    if first_iter:
+                        (next_val, updated_get_next_val) = self._maybe_detect_generator(
+                            next_val
+                        )
+                        if updated_get_next_val is not None:
+                            get_next_val = updated_get_next_val
+                    if inspect.isawaitable(next_val):
+                        rv = await next_val
                     else:
-                        rv = maybe_coro
+                        rv = next_val
                     if isinstance(rv, (StopIteration, StopAsyncIteration)):
                         break
                 except Exception as err:
                     await self.result_fanout.send_exception(err)
+                    self.exception_callback(*sys.exc_info())
                     break
                 else:
                     await self.result_fanout.send_result(rv)

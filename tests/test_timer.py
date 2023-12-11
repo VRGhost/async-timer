@@ -19,7 +19,7 @@ class TestAsyncFunc:
         vals = []
         timer = async_timer.Timer(10e-5, target=lambda: vals.append(count_fn()))
         timer.start()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
         stop_method = getattr(timer, stop_method_name)
         await stop_method()
         after_cancel_vals = tuple(vals)
@@ -33,7 +33,7 @@ class TestAsyncFunc:
     @pytest.mark.asyncio
     async def test_join_non_running_timer(self, count_fn):
         timer = async_timer.Timer(10e-5, target=lambda: count_fn())
-        with pytest.raises(RuntimeError):
+        with pytest.raises(asyncio.CancelledError):
             await timer.join()
 
     @pytest.mark.asyncio
