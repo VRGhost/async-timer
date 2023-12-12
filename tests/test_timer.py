@@ -65,7 +65,7 @@ class TestAsyncFunc:
         vals = []
         async_for_vals = []
 
-        async def _target():
+        async def _target() -> int:
             val = count_fn()
             await asyncio.sleep(10e-7)
             vals.append(val)
@@ -87,7 +87,7 @@ class TestAsyncFunc:
         vals = []
         async_for_vals = []
 
-        def _target():
+        def _target() -> int:
             val = count_fn()
             vals.append(val)
             return val
@@ -152,7 +152,7 @@ class TestAsyncFunc:
     async def test_timer_exception(self):
         vals = []
 
-        def _target():
+        def _target() -> int:
             for idx in itertools.count():
                 vals.append(idx)
                 yield idx

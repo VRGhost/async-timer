@@ -2,14 +2,18 @@
 import asyncio
 import inspect
 import logging
-import sys
 import typing
 
 logger = logging.getLogger(__name__)
 T = typing.TypeVar("T")
+TimerMainTaskT = typing.Union[
+    typing.Callable[[], T],
+    typing.Callable[[], typing.Coroutine[typing.Any, typing.Any, T]],
+]
+TimerCallbackT = typing.Callable[["Timer[T]", TimerMainTaskT[T]], None]
 
 
-class FanoutRv:
+class FanoutRv(typing.Generic[T]):
     """An object that shares a result actoss all waiters"""
 
     lock: asyncio.Lock
@@ -19,20 +23,20 @@ class FanoutRv:
         self.futures = []
         self.lock = asyncio.Lock()
 
-    async def wait(self):
+    async def wait(self) -> T:
         """Wait for result to be posted"""
         future = asyncio.get_running_loop().create_future()
         async with self.lock:
             self.futures.append(future)
         return await future
 
-    async def send_result(self, result):
+    async def send_result(self, result: T):
         async with self.lock:
             for future in self.futures:
                 future.set_result(result)
             self.futures.clear()
 
-    async def send_exception(self, exc):
+    async def send_exception(self, exc: Exception):
         async with self.lock:
             for future in self.futures:
                 future.set_exception(exc)
@@ -45,25 +49,23 @@ class FanoutRv:
             self.futures.clear()
 
 
-def _default_main_loop_exception_callback(exc_type, exc_val, exc_tb):
+def _default_main_loop_exception_callback(timer, timer_target):
     logger.exception("An unexpected exception in the timer loop.")
 
 
-class Timer:
+class Timer(typing.Generic[T]):
     delay: float
-    target: typing.Callable[[], T]
+    target: TimerMainTaskT[T]
 
-    result_fanout: FanoutRv
+    result_fanout: FanoutRv[T]
     main_task: typing.Optional[asyncio.Task] = None
-    exception_callback: typing.Callable[[typing.Any, typing.Any, typing.Any], None]
+    exception_callback: TimerCallbackT[T]
 
     def __init__(
         self,
         delay: float,
-        target: typing.Callable[[], T],
-        exc_cb: typing.Callable[
-            [typing.Any, typing.Any, typing.Any], None
-        ] = _default_main_loop_exception_callback,
+        target: TimerMainTaskT[T],
+        exc_cb: TimerCallbackT[T] = _default_main_loop_exception_callback,
     ):
         self.delay = delay
         self.target = target
@@ -82,17 +84,17 @@ class Timer:
         """Return `True` if the timer is currently scheduled"""
         return (self.main_task is not None) and (not self.main_task.done())
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Timer[T]":
         self.start()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.cancel()
 
-    def __aiter__(self):
+    def __aiter__(self) -> typing.AsyncIterator[T]:
         return self
 
-    async def join(self):
+    async def join(self) -> T:
         """Wait for the next tick of the timer"""
         if not self.is_running():
             raise asyncio.CancelledError("The timer is not running.")
@@ -100,7 +102,7 @@ class Timer:
             await self.result_fanout.wait()
         )  # this can raise `asyncio.CancelledError`
 
-    async def __anext__(self):
+    async def __anext__(self) -> T:
         try:
             return await self.join()
         except asyncio.CancelledError as err:
@@ -108,7 +110,7 @@ class Timer:
 
     def _maybe_detect_generator(
         self, target_rv
-    ) -> typing.Tuple[typing.Any, typing.Callable[[], T]]:
+    ) -> typing.Tuple[T, typing.Callable[[], T]]:
         """Check if the value returned by the `self.target` call is a
         kind of generator (sync or async).
 
@@ -153,7 +155,7 @@ class Timer:
                         break
                 except Exception as err:
                     await self.result_fanout.send_exception(err)
-                    self.exception_callback(*sys.exc_info())
+                    self.exception_callback(self, self.target)
                     break
                 else:
                     await self.result_fanout.send_result(rv)
