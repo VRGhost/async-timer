@@ -26,16 +26,62 @@ This package is particularly useful for tasks like automatically updating caches
 
 ## Example Usage
 
+### FastAPI
+
+This snippet starts fastapi webserver with the `refresh_db` function being executed every 5 seconds, refresing a shared `DB_CACHE` object.
+
+```python
+
+import contextlib
+import time
+
+import uvicorn
+from fastapi import FastAPI
+
+import async_timer
+
+DB_CACHE = {"initialised": False}
+
+
+async def refresh_db():
+    global DB_CACHE
+    DB_CACHE |= {"initialised": True, "cur_value": time.time()}
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with async_timer.Timer(delay=5, target=refresh_db):
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/")
+async def root():
+    return {"message": "Hello World", "db_cache": DB_CACHE}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+```
+
+### join()
 ```python
 
 import async_timer
 
-# Simple timer example
 timer = async_timer.Timer(12, target=lambda: 42)
 timer.start()
-val = await timer.join()  # `val` will be 42 after 12 seconds
+val = await timer.join()  # `val` will be set to 42 after 12 seconds
+```
 
+### for loop
+```python
 # Async for loop example
+import async_timer
 import time
 with async_timer.Timer(14, target=time.time) as timer:
     async for time_rv in timer:

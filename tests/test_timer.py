@@ -1,9 +1,10 @@
 import asyncio
 import itertools
 
-import async_timer
 import asyncstdlib
 import pytest
+
+import async_timer
 
 
 class TestAsyncFunc:
