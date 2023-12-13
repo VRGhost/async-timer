@@ -107,6 +107,8 @@ class TestAsyncFunc:
     async def test_timer_subscribe_sync_generator(self, count_fn):
         vals = []
         async_for_vals = []
+        term_evt = asyncio.Event()
+        exc_evt = asyncio.Event()
 
         def _target():
             while True:
@@ -114,7 +116,12 @@ class TestAsyncFunc:
                 vals.append(el)
                 yield el
 
-        async with async_timer.Timer(10e-5, target=_target) as timer:
+        async with async_timer.Timer(
+            10e-5,
+            target=_target,
+            exc_cb=lambda *a, **kw: exc_evt.set(),
+            cancel_cb=lambda *a, **kw: term_evt.set(),
+        ) as timer:
             async for (idx, val) in asyncstdlib.enumerate(timer):
                 async_for_vals.append(val)
                 await asyncio.sleep(0.01)
@@ -124,6 +131,8 @@ class TestAsyncFunc:
         assert len(vals) > 10
         assert len(async_for_vals) > 10
         assert set(async_for_vals).issubset(vals)
+        assert not term_evt.is_set(), "The generator did not terminate"
+        assert not exc_evt.is_set(), "No exceptions"
 
     @pytest.mark.asyncio
     async def test_timer_subscribe_async_generator(self, count_fn):
@@ -150,6 +159,8 @@ class TestAsyncFunc:
 
     @pytest.mark.asyncio
     async def test_timer_exception(self):
+        term_evt = asyncio.Event()
+        exc_evt = asyncio.Event()
         vals = []
 
         def _target() -> int:
@@ -160,7 +171,12 @@ class TestAsyncFunc:
                     raise NameError("Something went wrong")
 
         iter_vals = []
-        async with async_timer.Timer(10e-5, target=_target) as timer:
+        async with async_timer.Timer(
+            10e-5,
+            target=_target,
+            exc_cb=lambda *a, **kw: exc_evt.set(),
+            cancel_cb=lambda *a, **kw: term_evt.set(),
+        ) as timer:
             with pytest.raises(NameError) as err:
                 async for val in timer:
                     iter_vals.append(val)
@@ -170,9 +186,14 @@ class TestAsyncFunc:
         assert len(vals) > 10
         assert len(iter_vals) > 10
         assert set(iter_vals).issubset(vals)
+        assert term_evt.is_set(), "The generator did terminate"
+        assert exc_evt.is_set(), "There was an exception"
 
     @pytest.mark.asyncio
     async def test_async_generator_exit(self):
+        term_evt = asyncio.Event()
+        exc_evt = asyncio.Event()
+
         async def _target():
             for idx in itertools.count():
                 yield idx
@@ -181,12 +202,19 @@ class TestAsyncFunc:
                     break
 
         iter_vals = []
-        async with async_timer.Timer(10e-5, target=_target) as timer:
+        async with async_timer.Timer(
+            10e-5,
+            target=_target,
+            exc_cb=lambda *a, **kw: exc_evt.set(),
+            cancel_cb=lambda *a, **kw: term_evt.set(),
+        ) as timer:
             async for val in timer:
                 iter_vals.append(val)
                 await asyncio.sleep(10e-10)
 
         assert len(iter_vals) == 21
+        assert term_evt.is_set(), "The generator did terminate"
+        assert not exc_evt.is_set(), "No exceptions"
 
     @pytest.mark.asyncio
     async def test_sync_generator_exit(self):

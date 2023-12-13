@@ -9,6 +9,8 @@ T = typing.TypeVar("T")
 TimerMainTaskT = typing.Union[
     typing.Callable[[], T],
     typing.Callable[[], typing.Coroutine[typing.Any, typing.Any, T]],
+    typing.Callable[[], typing.AsyncGenerator[T, typing.Any]],
+    typing.Callable[[], typing.Generator[T, typing.Any, typing.Any]],
 ]
 TimerCallbackT = typing.Callable[["Timer[T]", TimerMainTaskT[T]], None]
 
@@ -49,7 +51,11 @@ class FanoutRv(typing.Generic[T]):
             self.futures.clear()
 
 
-def _default_main_loop_exception_callback(timer, timer_target):
+def _noop_cb(*_, **__):
+    pass
+
+
+def _default_main_loop_exception_callback(*_, **__):
     logger.exception("An unexpected exception in the timer loop.")
 
 
@@ -60,17 +66,20 @@ class Timer(typing.Generic[T]):
     result_fanout: FanoutRv[T]
     main_task: typing.Optional[asyncio.Task] = None
     exception_callback: TimerCallbackT[T]
+    cancel_callback: TimerCallbackT[T]
 
     def __init__(
         self,
         delay: float,
         target: TimerMainTaskT[T],
         exc_cb: TimerCallbackT[T] = _default_main_loop_exception_callback,
+        cancel_cb: TimerCallbackT[T] = _noop_cb,
     ):
         self.delay = delay
         self.target = target
         self.result_fanout = FanoutRv()
         self.exception_callback = exc_cb
+        self.cancel_callback = cancel_cb
 
     def start(self):
         """Schedule the timer to run."""
@@ -151,8 +160,8 @@ class Timer(typing.Generic[T]):
                         rv = await next_val
                     else:
                         rv = next_val
-                    if isinstance(rv, (StopIteration, StopAsyncIteration)):
-                        break
+                except (StopIteration, StopAsyncIteration):
+                    break
                 except Exception as err:
                     await self.result_fanout.send_exception(err)
                     self.exception_callback(self, self.target)
@@ -164,6 +173,7 @@ class Timer(typing.Generic[T]):
         finally:
             # Main loop finished - cancel all watchers
             await self.result_fanout.cancel()
+            self.cancel_callback(self, self.target)
 
     async def cancel(self):
         """Unshedule the timer"""
