@@ -50,7 +50,8 @@ async def refresh_db():
 
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
-    async with async_timer.Timer(delay=5, target=refresh_db):
+    async with async_timer.Timer(delay=5, target=refresh_db) as timer:
+        await timer.wait(hit_count=1)  # block until the timer triggers at least once
         yield
 
 
@@ -64,7 +65,6 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
 
 ```
 

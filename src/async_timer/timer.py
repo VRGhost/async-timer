@@ -61,6 +61,7 @@ def _default_main_loop_exception_callback(*_, **__):
 
 class Timer(typing.Generic[T]):
     delay: float
+    hit_count: int = 0  # Number of times the timer has run so far
     target: TimerMainTaskT[T]
 
     result_fanout: FanoutRv[T]
@@ -110,6 +111,29 @@ class Timer(typing.Generic[T]):
         return (
             await self.result_fanout.wait()
         )  # this can raise `asyncio.CancelledError`
+
+    async def wait(
+        self, /, hit_count: int = None, hits: int = None
+    ) -> typing.Optional[T]:
+        """
+        Wait for the timer to reach certain hit count
+            or wait for a certain number of hits.
+
+        Returns the last generated result IF there was a need to wait.
+        Returns `None` otherwise.
+        """
+        if hit_count is not None:
+            target_hit_count = max(0, hit_count)
+        elif hits is not None:
+            target_hit_count = self.hit_count + max(0, hits)
+        else:
+            raise RuntimeError("Please provide either `hits` or `hit_count`")
+        need_to_wait_for = target_hit_count - self.hit_count
+        last_rv = None
+        while need_to_wait_for > 0:
+            last_rv = await self.join()
+            need_to_wait_for -= 1
+        return last_rv
 
     async def __anext__(self) -> T:
         try:
@@ -169,6 +193,7 @@ class Timer(typing.Generic[T]):
                 else:
                     await self.result_fanout.send_result(rv)
                 first_iter = False
+                self.hit_count += 1
                 await asyncio.sleep(self.delay)
         finally:
             # Main loop finished - cancel all watchers

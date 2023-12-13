@@ -216,6 +216,7 @@ class TestAsyncFunc:
         assert len(iter_vals) == 21
         assert term_evt.is_set(), "The generator did terminate"
         assert not exc_evt.is_set(), "No exceptions"
+        assert timer.hit_count == 21
 
     @pytest.mark.asyncio
     async def test_sync_generator_exit(self):
@@ -232,3 +233,50 @@ class TestAsyncFunc:
                 await asyncio.sleep(10e-10)
 
         assert len(iter_vals) == 21
+
+    @pytest.mark.asyncio
+    async def test_wait_for_empty(self, count_fn):
+        async with async_timer.Timer(10e-15, target=count_fn) as timer:
+            with pytest.raises(RuntimeError):
+                await timer.wait()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "initial_hits, wait_for_delta, exp_rv",
+        (
+            [0, -100, None],
+            [0, 0, None],
+            [10, 0, None],
+            [10, 1, 10],
+            [10, 5, 14],
+            [10, 6, 15],
+            [10, 1000, 1009],
+        ),
+    )
+    async def test_wait_for_delta(self, count_fn, initial_hits, wait_for_delta, exp_rv):
+        async with async_timer.Timer(10e-15, target=count_fn) as timer:
+            for _ in range(initial_hits):
+                await timer.join()
+            timer_rv = await timer.wait(hits=wait_for_delta)
+            assert timer_rv == exp_rv
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "initial_hits, wait_for_hits, exp_rv",
+        (
+            [0, -100, None],
+            [0, 0, None],
+            [10, 0, None],
+            [0, 1, 0],
+            [0, 100, 99],
+            [70, 100, 99],
+        ),
+    )
+    async def test_wait_for_absolute(
+        self, count_fn, initial_hits, wait_for_hits, exp_rv
+    ):
+        async with async_timer.Timer(10e-15, target=count_fn) as timer:
+            for _ in range(initial_hits):
+                await timer.join()
+            timer_rv = await timer.wait(hit_count=wait_for_hits)
+            assert timer_rv == exp_rv
