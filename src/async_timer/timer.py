@@ -210,3 +210,12 @@ class Timer(typing.Generic[T]):
     async def stop(self):
         """An alias to `cancel()`"""
         return await self.cancel()
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__} target={self.target!r} delay={self.delay!r}"
+            f" hit_count={self.hit_count!r}"
+            f" exception_callback={self.exception_callback!r}"
+            f" cancel_callback={self.cancel_callback!r}"
+            ">"
+        )

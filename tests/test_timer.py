@@ -230,7 +230,7 @@ class TestAsyncFunc:
         async with async_timer.Timer(10e-5, target=_target) as timer:
             async for val in timer:
                 iter_vals.append(val)
-                await asyncio.sleep(10e-10)
+                await asyncio.sleep(10e-20)
 
         assert len(iter_vals) == 21
 
@@ -280,3 +280,38 @@ class TestAsyncFunc:
                 await timer.join()
             timer_rv = await timer.wait(hit_count=wait_for_hits)
             assert timer_rv == exp_rv
+
+    def test_repr(self):
+        timer = async_timer.Timer(10, target="Test Function")
+        assert repr(timer).startswith(
+            """<Timer target='Test Function' delay=10 hit_count=0 exception_callback="""
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("raise_exception", [True, False])
+    @pytest.mark.parametrize("manual_terminate", [True, False])
+    async def test_cancel_callback_is_always_called(
+        self, raise_exception, manual_terminate
+    ):
+        term_evt = asyncio.Event()
+
+        def _target():
+            for idx in range(100):
+                if raise_exception and idx > 50:
+                    raise RuntimeError("I am dead now")
+                yield idx
+
+        async with async_timer.Timer(
+            10e-5,
+            target=_target,
+            cancel_cb=lambda *a, **kw: term_evt.set(),
+        ) as timer:
+            try:
+                async for val in timer:
+                    if val > 55 and manual_terminate:
+                        await timer.cancel()
+                    await asyncio.sleep(10e-10)
+            except RuntimeError:
+                pass
+
+        assert term_evt.is_set(), "The generator did terminate"
