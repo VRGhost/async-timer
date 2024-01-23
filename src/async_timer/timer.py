@@ -1,6 +1,5 @@
 """Utility async io functions"""
 import asyncio
-import inspect
 import logging
 import time
 import typing
@@ -14,6 +13,8 @@ TimerMainTaskT = typing.Union[
     typing.Callable[[], typing.Coroutine[typing.Any, typing.Any, T]],
     typing.Callable[[], typing.AsyncGenerator[T, typing.Any]],
     typing.Callable[[], typing.Generator[T, typing.Any, typing.Any]],
+    typing.AsyncGenerator[T, typing.Any],
+    typing.Generator[T, typing.Any, typing.Any],
 ]
 TimerCallbackT = typing.Callable[["Timer[T]", TimerMainTaskT[T]], None]
 
@@ -95,7 +96,7 @@ class Timer(typing.Generic[T]):
                             one resolving cancels the timer
         """
         self.iterator = async_timer.pacemaker.TimerPacemaker(delay)
-        self.target = target
+        self.target_caller = async_timer.traget_caller.Caller(target)
         self.result_fanout = FanoutRv()
         self.exception_callback = exc_cb
         self.cancel_callback = cancel_cb
@@ -189,63 +190,24 @@ class Timer(typing.Generic[T]):
         except asyncio.CancelledError as err:
             raise StopAsyncIteration() from err
 
-    def _maybe_detect_generator(
-        self, target_rv
-    ) -> typing.Tuple[T, typing.Callable[[], T]]:
-        """Check if the value returned by the `self.target` call is a
-        kind of generator (sync or async).
-
-        Returns a (this_iter_rv, new_callable) tuple
-        """
-        if inspect.isgenerator(target_rv):
-
-            def _lock_sync_gen_ctx(gen_src):
-                return lambda: next(gen_src)
-
-            get_next_val = _lock_sync_gen_ctx(target_rv)
-            rv = (get_next_val(), get_next_val)
-        elif inspect.isasyncgen(target_rv):
-
-            def _lock_async_gen_ctx(gen_src):
-                return lambda: gen_src.__anext__()
-
-            get_next_val = _lock_async_gen_ctx(target_rv)
-            rv = (get_next_val(), get_next_val)
-        else:
-            rv = (target_rv, None)
-        return rv
-
     async def _loop_callback_routine(self):
-        get_next_val = self.target
-        first_iter = True
         try:
             async for _ in self.iterator:
                 try:
-                    next_val = get_next_val()
-                    if first_iter:
-                        (next_val, updated_get_next_val) = self._maybe_detect_generator(
-                            next_val
-                        )
-                        if updated_get_next_val is not None:
-                            get_next_val = updated_get_next_val
-                    if inspect.isawaitable(next_val):
-                        rv = await next_val
-                    else:
-                        rv = next_val
-                except (StopIteration, StopAsyncIteration):
+                    rv = await self.target_caller.next()
+                except StopAsyncIteration:
                     break
                 except Exception as err:
                     await self.result_fanout.send_exception(err)
-                    self.exception_callback(self, self.target)
+                    self.exception_callback(self, self.target_caller.target)
                     break
                 else:
                     await self.result_fanout.send_result(rv)
-                first_iter = False
                 self.hit_count += 1
         finally:
             # Main loop finished - cancel all watchers
             await self.result_fanout.cancel()
-            self.cancel_callback(self, self.target)
+            self.cancel_callback(self, self.target_caller.target)
 
     async def cancel(self):
         """Unshedule the timer"""
@@ -261,7 +223,8 @@ class Timer(typing.Generic[T]):
 
     def __repr__(self) -> str:
         return (
-            f"<{self.__class__.__name__} target={self.target!r} delay={self.delay!r}"
+            f"<{self.__class__.__name__} target={self.target_caller.target!r}"
+            f" delay={self.delay!r}"
             f" hit_count={self.hit_count!r}"
             f" exception_callback={self.exception_callback!r}"
             f" cancel_callback={self.cancel_callback!r}"

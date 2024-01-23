@@ -8,12 +8,6 @@ import async_timer
 
 
 class TestAsyncFunc:
-    @pytest.fixture
-    def count_fn(self):
-        """A function that returns incrementing ints"""
-        gen = itertools.count()
-        return lambda: next(gen)
-
     @pytest.mark.asyncio
     @pytest.mark.parametrize("stop_method_name", ["stop", "cancel"])
     async def test_api_call(self, count_fn, stop_method_name):
@@ -136,7 +130,8 @@ class TestAsyncFunc:
         assert not exc_evt.is_set(), "No exceptions"
 
     @pytest.mark.asyncio
-    async def test_timer_subscribe_async_generator(self, count_fn):
+    @pytest.mark.parametrize("direct_generator", [True, False])
+    async def test_timer_subscribe_async_generator(self, count_fn, direct_generator):
         vals = []
         async_for_vals = []
 
@@ -147,7 +142,12 @@ class TestAsyncFunc:
                 yield el
                 await asyncio.sleep(10e-4)
 
-        async with async_timer.Timer(10e-5, target=_target) as timer:
+        if direct_generator:
+            constructor_target = _target()
+        else:
+            constructor_target = _target
+
+        async with async_timer.Timer(10e-5, target=constructor_target) as timer:
             async for (idx, val) in asyncstdlib.enumerate(timer):
                 async_for_vals.append(val)
                 await asyncio.sleep(0.01)
