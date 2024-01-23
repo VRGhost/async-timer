@@ -237,8 +237,14 @@ class TestAsyncFunc:
     @pytest.mark.asyncio
     async def test_wait_for_empty(self, count_fn):
         async with async_timer.Timer(10e-15, target=count_fn) as timer:
-            with pytest.raises(RuntimeError):
-                await timer.wait()
+            rv = await timer.wait(timeout=0.5)
+        assert rv > 3_000
+
+    @pytest.mark.asyncio
+    async def test_raises_timeout_on_long_wait(self, count_fn):
+        async with async_timer.Timer(10_0000, target=count_fn) as timer:
+            with pytest.raises(asyncio.TimeoutError):
+                await timer.wait(hit_count=42, timeout=0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

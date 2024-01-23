@@ -2,7 +2,10 @@
 import asyncio
 import inspect
 import logging
+import time
 import typing
+
+import async_timer
 
 logger = logging.getLogger(__name__)
 T = typing.TypeVar("T")
@@ -57,10 +60,13 @@ def _noop_cb(*_, **__):
 
 def _default_main_loop_exception_callback(*_, **__):
     logger.exception("An unexpected exception in the timer loop.")
+    raise
 
 
 class Timer(typing.Generic[T]):
-    delay: float
+    """The main Timer object"""
+
+    iterator: "async_timer.pacemaker.TimerPacemaker"
     hit_count: int = 0  # Number of times the timer has run so far
     target: TimerMainTaskT[T]
 
@@ -75,12 +81,33 @@ class Timer(typing.Generic[T]):
         target: TimerMainTaskT[T],
         exc_cb: TimerCallbackT[T] = _default_main_loop_exception_callback,
         cancel_cb: TimerCallbackT[T] = _noop_cb,
+        cancel_aws: typing.Union[typing.Sequence[typing.Awaitable], None] = None,
+        start: bool = False,
     ):
-        self.delay = delay
+        """Create the Timer object.
+
+        Parameters:
+            `delay` - number of seconds between timer incovations
+            `target` - the callable the timer will be invoking at the `delay` period
+            `exc_cb` - a callback that the timer will call on exception
+            `cancel_cb` - callback the timer will call at cancellation
+            `cancel_aws` - a list of awaitables, where any
+                            one resolving cancels the timer
+        """
+        self.iterator = async_timer.pacemaker.TimerPacemaker(delay)
         self.target = target
         self.result_fanout = FanoutRv()
         self.exception_callback = exc_cb
         self.cancel_callback = cancel_cb
+        if cancel_aws:
+            self.iterator.stop_on(list(cancel_aws))
+        if start:
+            self.start()
+
+    @property
+    def delay(self) -> float:
+        """A shorthand to access timer firing delay"""
+        return self.iterator.delay
 
     def start(self):
         """Schedule the timer to run."""
@@ -113,26 +140,47 @@ class Timer(typing.Generic[T]):
         )  # this can raise `asyncio.CancelledError`
 
     async def wait(
-        self, /, hit_count: int = None, hits: int = None
+        self, /, hit_count: int = None, hits: int = None, timeout: float = None
     ) -> typing.Optional[T]:
         """
         Wait for the timer to reach certain hit count
             or wait for a certain number of hits.
 
+        Can raise `asyncio.TimeoutError` if there was a wait condition
+            and timeout specified and the wait did not manage to hit
+            the condition in time
+
+        Waits for the timer to stop if neither parameter is present.
+
         Returns the last generated result IF there was a need to wait.
         Returns `None` otherwise.
         """
+        start_time = time.monotonic()
+        timeout_left = timeout
+        infinite_wait = False
         if hit_count is not None:
             target_hit_count = max(0, hit_count)
         elif hits is not None:
             target_hit_count = self.hit_count + max(0, hits)
         else:
-            raise RuntimeError("Please provide either `hits` or `hit_count`")
+            target_hit_count = 0
+            infinite_wait = True
         need_to_wait_for = target_hit_count - self.hit_count
         last_rv = None
-        while need_to_wait_for > 0:
-            last_rv = await self.join()
-            need_to_wait_for -= 1
+        try:
+            while infinite_wait or need_to_wait_for > 0:
+                last_rv = await asyncio.wait_for(self.join(), timeout_left)
+                need_to_wait_for -= 1
+                if timeout is not None:
+                    time_passed = time.monotonic() - start_time
+                    timeout_left = timeout - time_passed
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            # Cancelled/Timeout error is what we were waiting
+            # for in the infinite wait mode
+            if infinite_wait:
+                pass
+            else:
+                raise
         return last_rv
 
     async def __anext__(self) -> T:
@@ -171,7 +219,7 @@ class Timer(typing.Generic[T]):
         get_next_val = self.target
         first_iter = True
         try:
-            while True:
+            async for _ in self.iterator:
                 try:
                     next_val = get_next_val()
                     if first_iter:
@@ -194,7 +242,6 @@ class Timer(typing.Generic[T]):
                     await self.result_fanout.send_result(rv)
                 first_iter = False
                 self.hit_count += 1
-                await asyncio.sleep(self.delay)
         finally:
             # Main loop finished - cancel all watchers
             await self.result_fanout.cancel()
@@ -205,6 +252,7 @@ class Timer(typing.Generic[T]):
         if self.main_task:
             self.main_task.cancel()
             await self.result_fanout.cancel()
+            self.iterator.stop()
             self.main_task = None
 
     async def stop(self):

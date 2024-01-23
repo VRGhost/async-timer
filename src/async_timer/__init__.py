@@ -1,2 +1,2 @@
-from . import timer
+from . import pacemaker, timer
 from .timer import Timer
