@@ -49,3 +49,26 @@ async def test_mock_timer_is_coroutine_friendly():
 
     assert timer_hit_count >= 1
     assert my_hit_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_event_listener_works():
+    hit_count = 0
+    end_evt = asyncio.Event()
+
+    def _target():
+        nonlocal hit_count
+        hit_count += 1
+        if hit_count >= 1000:
+            end_evt.set()
+
+    mock_timer = mock_async_timer.MockTimer(
+        target=_target, delay=10_000, start=True, cancel_aws=[end_evt.wait()]
+    )
+
+    assert mock_timer.is_running()
+    await mock_timer.wait(), "Wait for it to exit"
+
+    assert hit_count >= 1000
+    assert not mock_timer.is_running()
+    assert mock_timer.pacemaker.sleep.await_count == (hit_count - 1)

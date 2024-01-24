@@ -24,6 +24,13 @@ class MockPacemaker(async_timer.pacemaker.TimerPacemaker):
         asyncio.get_event_loop().call_soon(lambda: fut.set_result(42))
         await fut
 
+    @classmethod
+    def fromPacemaker(cls, original: async_timer.pacemaker.TimerPacemaker):
+        """Create MockPacemaker from the non-mock original."""
+        out = cls(delay=original.delay)
+        out.stop_on(original._cancel_futs)
+        return out
+
 
 class MockTimer(async_timer.Timer):
     """Test-friendly mock timer class.
@@ -36,4 +43,4 @@ class MockTimer(async_timer.Timer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.pacemaker = MockPacemaker(self.pacemaker.delay)
+        self.pacemaker = MockPacemaker.fromPacemaker(self.pacemaker)
