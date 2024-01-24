@@ -24,6 +24,7 @@ This package is particularly useful for tasks like automatically updating caches
 * **Wait for the Next Tick**: You can set it up so your program waits for the timer to do its thing, and then continues.
 * **Keep Getting Updates**: You can use it in a loop to keep getting updates every time the timer goes off.
 * **Cancel anytime**: The timer object can be stopped at any time either explicitly by calling `stop()`/`cancel()` method OR it can stop automatically on an awaitable resolving (the `cancel_aws` constructor artument)
+* **Test friendly**: The package provides an additional `mock_async_timer.MockTimer` class with mocked sleep function to aid in your testing
 
 ## Example Usage
 

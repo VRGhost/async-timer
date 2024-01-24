@@ -67,7 +67,7 @@ def _default_main_loop_exception_callback(*_, **__):
 class Timer(typing.Generic[T]):
     """The main Timer object"""
 
-    iterator: "async_timer.pacemaker.TimerPacemaker"
+    pacemaker: "async_timer.pacemaker.TimerPacemaker"
     hit_count: int = 0  # Number of times the timer has run so far
     target: TimerMainTaskT[T]
 
@@ -95,20 +95,20 @@ class Timer(typing.Generic[T]):
             `cancel_aws` - a list of awaitables, where any
                             one resolving cancels the timer
         """
-        self.iterator = async_timer.pacemaker.TimerPacemaker(delay)
+        self.pacemaker = async_timer.pacemaker.TimerPacemaker(delay)
         self.target_caller = async_timer.traget_caller.Caller(target)
         self.result_fanout = FanoutRv()
         self.exception_callback = exc_cb
         self.cancel_callback = cancel_cb
         if cancel_aws:
-            self.iterator.stop_on(list(cancel_aws))
+            self.pacemaker.stop_on(list(cancel_aws))
         if start:
             self.start()
 
     @property
     def delay(self) -> float:
         """A shorthand to access timer firing delay"""
-        return self.iterator.delay
+        return self.pacemaker.delay
 
     def start(self):
         """Schedule the timer to run."""
@@ -192,7 +192,7 @@ class Timer(typing.Generic[T]):
 
     async def _loop_callback_routine(self):
         try:
-            async for _ in self.iterator:
+            async for _ in self.pacemaker:
                 try:
                     rv = await self.target_caller.next()
                 except StopAsyncIteration:
@@ -214,7 +214,7 @@ class Timer(typing.Generic[T]):
         if self.main_task:
             self.main_task.cancel()
             await self.result_fanout.cancel()
-            self.iterator.stop()
+            self.pacemaker.stop()
             self.main_task = None
 
     async def stop(self):
