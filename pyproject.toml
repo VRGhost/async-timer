@@ -66,7 +66,7 @@ line-length = 88
 
 [tool.ruff.isort]
 order-by-type = true
-known-first-party = ["async_timer", ]
+known-first-party = ["async_timer", "mock_async_timer", ]
 forced-separate = ["tests"]
 
 [tool.black]
@@ -74,7 +74,7 @@ line-length = 88
 target-version = ['py310']
 
 [tool.pytest.ini_options]
-addopts = "-v -l --color=yes --cov=async_timer --cov-report term-missing --no-cov-on-fail --local-badge-output-dir docs/badges/"
+addopts = "-v -l --color=yes --cov=async_timer --cov=mock_async_timer --cov-report term-missing --no-cov-on-fail --local-badge-output-dir docs/badges/"
 testpaths = [
     "tests",
 ]
