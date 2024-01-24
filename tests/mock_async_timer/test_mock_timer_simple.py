@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 import mock_async_timer
@@ -26,3 +28,24 @@ async def test_join_works():
     assert not mock_timer.is_running()
     assert mock_timer.delay == 10_000
     assert mock_timer.pacemaker.sleep.await_count == 999
+
+
+@pytest.mark.asyncio
+async def test_mock_timer_is_coroutine_friendly():
+    """Confirm that the mock timer allows for the other async code to run"""
+    timer_hit_count = 0
+
+    def _target():
+        nonlocal timer_hit_count
+        timer_hit_count += 1
+
+    my_hit_count = 0
+    async with mock_async_timer.MockTimer(
+        target=_target, delay=10_000
+    ), mock_async_timer.MockTimer(target=_target, delay=10_000):
+        for _ in range(101):
+            await asyncio.sleep(10e-5)
+            my_hit_count += 1
+
+    assert timer_hit_count >= 1
+    assert my_hit_count >= 1

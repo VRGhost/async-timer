@@ -1,3 +1,4 @@
+import asyncio
 import unittest.mock
 
 import async_timer
@@ -13,7 +14,15 @@ class MockPacemaker(async_timer.pacemaker.TimerPacemaker):
     async def _try_wait(self, delay: float):
         if self._cancel_evt.is_set():
             raise StopAsyncIteration()
+
+        await self._sleep_until_next_loop_iter()
         await self.sleep(delay)
+
+    async def _sleep_until_next_loop_iter(self):
+        """Awaiting this function will release on the next async loop iteration"""
+        fut = asyncio.Future()
+        asyncio.get_event_loop().call_soon(lambda: fut.set_result(42))
+        await fut
 
 
 class MockTimer(async_timer.Timer):
