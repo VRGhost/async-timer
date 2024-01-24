@@ -6,7 +6,8 @@ authors = ["Ilya O. <vrghost@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 packages = [
-    {include = "async_timer", from = "src"}
+    {include = "async_timer", from = "src"},
+    {include = "mock_async_timer", from = "src"}
 ]
 classifiers = [
     "Intended Audience :: Developers",
