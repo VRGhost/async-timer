@@ -110,6 +110,10 @@ class Timer(typing.Generic[T]):
         """A shorthand to access timer firing delay"""
         return self.pacemaker.delay
 
+    def set_delay(self, new_delay: float):
+        """Change the delay."""
+        self.pacemaker.delay = new_delay
+
     def start(self):
         """Schedule the timer to run."""
         if self.main_task:

@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import time
 
 import asyncstdlib
 import pytest
@@ -321,3 +322,17 @@ class TestAsyncFunc:
                 pass
 
         assert term_evt.is_set(), "The generator did terminate"
+
+    @pytest.mark.asyncio
+    async def test_change_delay(self, count_fn):
+        async with async_timer.Timer(10e-15, target=count_fn) as timer:
+            t1 = time.monotonic()
+            await timer.join()
+            await timer.join()
+            t2 = time.monotonic()
+            timer.set_delay(0.5)
+            await timer.join()
+            await timer.join()
+            t3 = time.monotonic()
+        assert t2 - t1 < 0.1
+        assert 0.4 < t3 - t2 < 1
